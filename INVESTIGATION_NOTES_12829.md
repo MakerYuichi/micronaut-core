@@ -42,3 +42,25 @@ Likely candidates:
 Need to find the micronaut-test module/repo (likely a SEPARATE github repo:
 micronaut-projects/micronaut-test) and look at how rebuildContext manages
 context/environment lifecycle between test executions.
+
+## UPDATE: found the likely real mechanism
+DefaultApplicationContext has two constructors:
+  1. DefaultApplicationContext(configuration) -> environmentManaged = true
+  2. DefaultApplicationContext(configuration, environment) -> environmentManaged = false
+
+stop() only calls environment.stop() when environmentManaged is true (line 312).
+
+Hypothesis: @MicronautTest(rebuildContext = true) likely reuses one Environment
+instance across multiple rebuilt ApplicationContexts (via constructor #2, to avoid
+re-reading config on every rebuild). If so, environment lifecycle becomes decoupled
+from any single context's lifecycle, which could explain properties being wiped/stale
+at unexpected times relative to a specific rebuilt context's ShutdownEvent.
+
+Properties interface is a @ConfigurationProperties proxy (isEnabled() likely resolves
+live against Environment on each call, not a cached value) -- consistent with a
+"shared/stale environment state" bug rather than a per-context caching bug.
+
+## Next step
+Write a test using constructor #2 (shared environment across two contexts) to try
+to reproduce "second context's ShutdownEvent listener sees wrong environment state"
+purely within micronaut-core, without needing the micronaut-test module.

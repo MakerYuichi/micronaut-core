@@ -54,6 +54,23 @@ class RebuildContextSharedEnvironmentTest {
                         "matching what was set at startup");
     }
 
+    @Test
+    void environmentPropertiesSurviveFirstContextStopWhenShared() {
+        DefaultApplicationContext first = new DefaultApplicationContext("test");
+        first.getEnvironment().addPropertySource(PropertySource.of("test", Map.of("app.enabled", true)));
+        first.start();
+        
+        Environment sharedEnvironment = first.getEnvironment();
+        boolean beforeStop = sharedEnvironment.getProperty("app.enabled", Boolean.class, false);
+        
+        first.stop();
+        
+        boolean afterStop = sharedEnvironment.getProperty("app.enabled", Boolean.class, false);
+        
+        assertTrue(beforeStop, "Property should be true before first context stops");
+        assertTrue(afterStop, "Property should STILL be true after first context stops, since the Environment is shared and will be reused");
+}
+
     @Singleton
     static class ShutdownListener {
         private final AtomicBoolean result;

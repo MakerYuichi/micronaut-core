@@ -64,3 +64,28 @@ live against Environment on each call, not a cached value) -- consistent with a
 Write a test using constructor #2 (shared environment across two contexts) to try
 to reproduce "second context's ShutdownEvent listener sees wrong environment state"
 purely within micronaut-core, without needing the micronaut-test module.
+
+## CORRECTION: earlier shared-Environment theory was wrong
+Verified against micronaut-test's actual source (AbstractMicronautExtension.java):
+rebuildContext builds a completely FRESH ApplicationContext + Environment via
+builder.build() -- it does NOT reuse/share the old Environment instance.
+So the shared-environment reproduction, while a real latent bug in
+DefaultApplicationContext.stop(), is NOT the mechanism behind #12829.
+
+## ACTUAL root cause, confirmed by running the real reproducer
+Ran auloin/micronaut-5-regressions' PropertiesShutdownHookTest directly. Log sequence:
+
+  "On startup - Is app enabled? true"          (test-scoped @Property override applied)
+  "On shutdown - Is app still enabled? false"  (override already reverted by shutdown time)
+
+The test uses @Property(name = "app.enabled", value = "true") on the test METHOD.
+This is a per-test property override applied/reverted by micronaut-test's JUnit5
+extension around the test method body. The context's actual stop()/ShutdownEvent
+fires later (at rebuild/teardown time), AFTER the per-test property override has
+already been reverted -- so the ShutdownEvent listener reads the reverted
+(default/false) value instead of the value that was live during the test.
+
+This points to the bug living in micronaut-test (specifically the ordering between
+per-test @Property revert and context stop/ShutdownEvent), not in micronaut-core's
+shutdown sequence itself, which we already verified fires ShutdownEvent correctly
+relative to its OWN environment lifecycle.

@@ -89,3 +89,26 @@ This points to the bug living in micronaut-test (specifically the ordering betwe
 per-test @Property revert and context stop/ShutdownEvent), not in micronaut-core's
 shutdown sequence itself, which we already verified fires ShutdownEvent correctly
 relative to its OWN environment lifecycle.
+
+## ROOT CAUSE CONFIRMED (in micronaut-test, not micronaut-core)
+Read AbstractMicronautExtension.java directly. Confirmed exact mechanism:
+
+1. beforeEach (rebuildContext=true): testProperties["app.enabled"]="true" is set,
+   THEN a fresh ApplicationContext is built via builder.build(), whose
+   propertySourcesLocator reads live from the testProperties field -- so the new
+   context correctly starts with app.enabled=true.
+
+2. afterEach (runs unconditionally, does NOT check rebuildContext()):
+   testProperties.remove("app.enabled") reverts the map, then
+   applicationContext.getEnvironment().refreshAndDiff() is called on the SAME
+   currently-live context -- this re-reads property sources (now missing the
+   override) and wipes the live environment's app.enabled value back to default,
+   long before that context's actual shutdown.
+
+3. Later, at class teardown or next rebuild, applicationContext.stop() fires
+   ShutdownEvent -- reads the ALREADY-REVERTED environment -- observes false.
+
+This is a micronaut-test bug: afterEach()'s per-test property revert-via-refresh
+does not account for rebuildContext=true, where each test's context is meant to
+be self-contained through its own natural teardown, not have its properties
+reverted mid-lifecycle by the SAME mechanism used for non-rebuilt tests.
